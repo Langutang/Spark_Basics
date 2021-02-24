@@ -26,4 +26,174 @@ flights_km = flights_km.withColumn('label', (flights_km.delay >= 15).cast('integ
 # Check first five records
 flights_km.show(5)
 
+#######################
+# CATEGORICAL COLUMNS #
+#######################
+from pyspark.ml.feature import StringIndexer
 
+# Create an indexer
+indexer = StringIndexer(inputCol='carrier', outputCol='carrier_idx')
+
+# Indexer identifies categories in the data
+indexer_model = indexer.fit(flights)
+
+# Indexer creates a new column with numeric index values
+flights_indexed = indexer_model.transform(flights)
+
+# Repeat the process for the other categorical feature
+flights_indexed = StringIndexer(inputCol='org', outputCol='org_idx').fit(flights_indexed).transform(flights_indexed)
+
+
+#######################
+# ASSEMBLING COLUMNS  #
+#######################
+# Import the necessary class
+from pyspark.ml.feature import VectorAssembler
+
+# Create an assembler object
+assembler = VectorAssembler(inputCols=[
+    'mon','dom','dow','carrier_idx','org_idx','km','depart','duration'
+], outputCol='features')
+
+# Consolidate predictor columns
+flights_assembled = assembler.transform(flights)
+
+# Check the resulting column
+flights_assembled.select('features', 'delay').show(5, truncate=False)
+
+#######################
+# DECISION TREE INIT  #
+#######################
+
+#######################
+# TRAIN TEST SPLIT    #
+#######################
+
+# Split into training and testing sets in a 80:20 ratio
+flights_train, flights_test = flights.randomSplit([.8, .2], seed=17)
+
+# Check that training set has around 80% of records
+training_ratio = flights_train.count() / flights.count()
+print(training_ratio)
+
+# Import the Decision Tree Classifier class
+from pyspark.ml.classification import DecisionTreeClassifier
+
+# Create a classifier object and fit to the training data
+tree = DecisionTreeClassifier()
+tree_model = tree.fit(flights_train)
+
+# Create predictions for the testing data and take a look at the predictions
+prediction = tree_model.transform(flights_test)
+prediction.select('label', 'prediction', 'probability').show(5, False)
+
+#######################
+#   CONFUSION MATRIX  #
+#######################
+
+# Create a confusion matrix
+prediction.groupBy('label', 'prediction').count().show()
+
+# Calculate the elements of the confusion matrix
+TN = prediction.filter('prediction = 0 AND label = prediction').count()
+TP = prediction.filter('prediction = 1 AND label = prediction').count()
+FN = prediction.filter('prediction = 0 AND label = 1').count()
+FP = prediction.filter('prediction = 1 AND label = 0').count()
+
+# Accuracy measures the proportion of correct predictions
+accuracy = (TN + TP) / (TN + TP + FN + FP)
+print(accuracy)
+
+#########################
+#  LOGISTIC REGRESSION  #
+#########################
+
+# Import the logistic regression class
+from pyspark.ml.classification import LogisticRegression
+
+# Create a classifier object and train on training data
+logistic = LogisticRegression().fit(flights_train)
+
+# Create predictions for the testing data and show confusion matrix
+prediction = logistic.transform(flights_test)
+prediction.groupBy("label", "prediction").count().show()
+
+#########################
+#  LOGISTIC REG EVALUATE #
+#########################
+from pyspark.ml.evaluation import MulticlassClassificationEvaluator, BinaryClassificationEvaluator
+
+# Calculate precision and recall
+precision = TP / (TP + FP)
+recall = TP / (TP + FN)
+print('precision = {:.2f}\nrecall    = {:.2f}'.format(precision, recall))
+
+# Find weighted precision
+multi_evaluator = MulticlassClassificationEvaluator()
+weighted_precision = multi_evaluator.evaluate(prediction, {multi_evaluator.metricName: "weightedPrecision"})
+
+# Find AUC
+binary_evaluator = BinaryClassificationEvaluator()
+auc = binary_evaluator.evaluate(prediction, {binary_evaluator.metricName: "areaUnderROC"})
+
+
+#########################
+#  TEXT DATA FORMATTING #
+#########################
+# Import the necessary functions
+from pyspark.sql.functions import regexp_replace
+from pyspark.ml.feature import Tokenizer
+
+# Remove punctuation (REGEX provided) and numbers
+wrangled = sms.withColumn('text', regexp_replace(sms.text, '[_():;,.!?\\-]', ' '))
+wrangled = wrangled.withColumn('text', regexp_replace(wrangled.text, '[0-9]', ' '))
+
+# Merge multiple spaces
+wrangled = wrangled.withColumn('text', regexp_replace(wrangled.text, ' +', ' '))
+
+# Split the text into words
+wrangled = Tokenizer(inputCol='text', outputCol='words').transform(wrangled)
+
+wrangled.show(4, truncate=False)
+
+from pyspark.ml.feature import StopWordsRemover, HashingTF, IDF
+
+# Remove stop words.
+wrangled = StopWordsRemover(inputCol='words', outputCol='terms')\
+      .transform(sms)
+
+# Apply the hashing trick
+wrangled = HashingTF(inputCol='terms', outputCol='hash', numFeatures=1024)\
+      .transform(wrangled)
+
+# Convert hashed symbols to TF-IDF
+tf_idf = IDF(inputCol='hash', outputCol='features')\
+      .fit(wrangled).transform(wrangled)
+      
+tf_idf.select('terms', 'features').show(4, truncate=False)
+
+#########################
+#     SPAM CLASSIFIER   #
+#########################
+
+'''
+The SMS data have now been prepared for building a classifier. Specifically, this is what you have done:
+
+removed numbers and punctuation
+split the messages into words (or "tokens")
+removed stop words
+applied the hashing trick and
+converted to a TF-IDF representation.
+'''
+
+# Split the data into training and testing sets
+sms_train, sms_test = sms.randomSplit([0.8, 0.2], seed=13)
+
+# Fit a Logistic Regression model to the training data
+logistic = LogisticRegression(regParam=0.2).fit(sms_train)
+
+# Make predictions on the testing data
+prediction = logistic.transform(sms_test)
+
+# Create a confusion matrix, comparing predictions to known labels
+prediction.groupBy('label', 'prediction').count().show()
