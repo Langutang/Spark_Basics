@@ -63,3 +63,43 @@ spark_temp.createOrReplaceTempView("temp")
 
 # Examine the tables in the catalog again
 print(spark.catalog.listTables())
+
+####################
+# LOADING FROM FILE#
+####################
+
+# Don't change this file path
+file_path = "/usr/local/share/datasets/airports.csv"
+
+# Read in the airports data
+airports = spark.read.csv(file_path, header=True)
+
+# Show the data
+airports.show()
+
+####################
+# CREATING COLUMNS #
+####################
+
+# Create the DataFrame flights
+flights = spark.table("flights")
+
+# Show the head
+flights.show()
+
+# Add duration_hrs
+flights = flights.withColumn("duration_hrs", flights.air_time/60)
+
+#############
+# FILTERING #
+#############
+
+# Filter flights by passing a string
+long_flights1 = flights.filter("distance > 1000")
+
+# Filter flights by passing a column of boolean values
+long_flights2 = flights.filter(flights.distance > 1000)
+
+# Print the data to check they're equal
+long_flights1.show()
+long_flights2.show()
