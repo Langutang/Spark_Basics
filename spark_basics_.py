@@ -34,3 +34,32 @@ flights10 = spark.sql(query)
 
 # Show the results
 flights10.show()
+
+##############################
+# QUERY AND CONVERT TO PD DF #
+##############################
+
+# Don't change this query
+query = "SELECT origin, dest, COUNT(*) as N FROM flights GROUP BY origin, dest"
+
+# Run the query
+flight_counts = spark.sql(query)
+
+pd_counts = flight_counts.toPandas()
+
+print(pd_counts.head())
+
+# Create pd_temp
+pd_temp = pd.DataFrame(np.random.random(10))
+
+# Create spark_temp from pd_temp
+spark_temp = spark.createDataFrame(pd_temp)
+
+# Examine the tables in the catalog
+print(spark.catalog.listTables())
+
+# Add spark_temp to the catalog
+spark_temp.createOrReplaceTempView("temp")
+
+# Examine the tables in the catalog again
+print(spark.catalog.listTables())
